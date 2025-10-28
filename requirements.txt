@@ -1,6 +1,6 @@
 streamlit
 pandas
 numpy
+ccxt
+pyTelegramBotAPI
 ta
-telebot
-hyperliquid-python-sdk
