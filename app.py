@@ -1,19 +1,19 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import time
 import datetime
+import time
 import telebot
-from hyperliquid.info import Info
+import ccxt
 from ta.momentum import RSIIndicator
 
 # ==========================================================
 # ⚙️ KONFIGURASI DASAR
 # ==========================================================
-st.set_page_config(page_title="⚡ Hyperliquid Futures Screener", layout="wide")
+st.set_page_config(page_title="⚡ Binance Futures Screener", layout="wide")
 
-st.title("⚡ Hyperliquid Futures Screener")
-st.caption("Deteksi pair ekstrem (StochRSI 0/100) & kirim notifikasi Telegram otomatis")
+st.title("⚡ Binance Futures Volatility Screener")
+st.caption("Deteksi pair ekstrem (StochRSI 0/100) & notifikasi Telegram otomatis")
 
 # ------------------- Telegram Config -------------------
 with st.expander("⚙️ Pengaturan Telegram Bot"):
@@ -31,27 +31,32 @@ with col2:
 refresh_interval = st.slider("⏱ Interval Auto Refresh (detik):", 60, 600, 180)
 
 # ==========================================================
-# 🔗 KONEKSI API Hyperliquid
+# 🔗 KONEKSI API BINANCE FUTURES
 # ==========================================================
-info = Info("https://api.hyperliquid.xyz")
+exchange = ccxt.binance({
+    "enableRateLimit": True,
+    "options": {"defaultType": "future"}
+})
 
 def get_all_symbols():
-    meta = info.meta()
-    return [x["name"] for x in meta["universe"]]
+    markets = exchange.load_markets()
+    return [m for m in markets if "/USDT" in m and "BUSD" not in m]
 
-def get_ohlcv(symbol, interval="1h", limit=100):
-    candles = info.candles(symbol, interval, limit)
-    if not candles:
+def get_ohlcv(symbol, timeframe="1h", limit=100):
+    try:
+        candles = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df["close"] = df["close"].astype(float)
+        return df
+    except Exception:
         return None
-    df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["close"] = df["close"].astype(float)
-    return df
 
 # ==========================================================
 # 📈 PERHITUNGAN STOCHRSI
 # ==========================================================
 def calc_stochrsi(df, period=14, smooth_k=3, smooth_d=3):
-    if len(df) < period * 2:
+    if df is None or len(df) < period * 2:
         return None, None
     rsi = RSIIndicator(df["close"], window=period).rsi()
     stochrsi = (rsi - rsi.rolling(period).min()) / (rsi.rolling(period).max() - rsi.rolling(period).min()) * 100
@@ -61,10 +66,12 @@ def calc_stochrsi(df, period=14, smooth_k=3, smooth_d=3):
 
 def send_telegram_message(token, chat_id, msg):
     if not token or not chat_id:
+        st.warning("⚠️ Telegram Token atau Chat ID belum diisi.")
         return
     try:
         bot = telebot.TeleBot(token)
         bot.send_message(chat_id, msg, parse_mode="Markdown")
+        st.success("✅ Pesan Telegram berhasil dikirim!")
     except Exception as e:
         st.error(f"Gagal kirim Telegram: {e}")
 
@@ -72,12 +79,12 @@ def send_telegram_message(token, chat_id, msg):
 # 🔍 FUNGSI SCREENER
 # ==========================================================
 def run_screener():
-    st.info("Mengambil data dari Hyperliquid API...")
+    st.info(f"Mengambil data dari Binance Futures ({interval}) ...")
     symbols = get_all_symbols()
     results = []
 
     for sym in symbols:
-        df = get_ohlcv(sym, interval=interval)
+        df = get_ohlcv(sym, timeframe=interval)
         if df is None:
             continue
         stoch_k, stoch_d = calc_stochrsi(df)
@@ -94,7 +101,7 @@ def run_screener():
     overbought = df[(df["StochRSI"] >= 99.90) & (df["MA_StochRSI"] >= 100.00)]
 
     if not oversold.empty or not overbought.empty:
-        msg = "🔥 *Hyperliquid Futures Alert!*\n\n"
+        msg = "🔥 *Binance Futures Screener Alert!*\n\n"
         if not oversold.empty:
             msg += "🟢 *OVERSOLD:*\n" + "\n".join(oversold["Pair"]) + "\n"
         if not overbought.empty:
@@ -107,7 +114,7 @@ def run_screener():
 # 🖥️ STREAMLIT UI
 # ==========================================================
 if test_button:
-    send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, "✅ Tes pesan dari *Hyperliquid Screener* berhasil!")
+    send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, "✅ Tes pesan dari *Binance Screener* berhasil!")
 
 if st.button("🔎 Jalankan Screener Sekarang"):
     with st.spinner("Menganalisis semua pair..."):
