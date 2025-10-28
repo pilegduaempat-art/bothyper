@@ -1,0 +1,6 @@
+streamlit
+pandas
+numpy
+ta
+telebot
+hyperliquid-python-sdk
