@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import asyncio
 import time
 import datetime
 import telebot
@@ -9,37 +8,38 @@ from hyperliquid.info import Info
 from ta.momentum import RSIIndicator
 
 # ==========================================================
-# 📦 CONFIG DAN INISIALISASI
+# ⚙️ KONFIGURASI DASAR
 # ==========================================================
 st.set_page_config(page_title="⚡ Hyperliquid Futures Screener", layout="wide")
 
 st.title("⚡ Hyperliquid Futures Screener")
 st.caption("Deteksi pair ekstrem (StochRSI 0/100) & kirim notifikasi Telegram otomatis")
 
-# ------------------- Input Telegram Config -------------------
+# ------------------- Telegram Config -------------------
 with st.expander("⚙️ Pengaturan Telegram Bot"):
     TELEGRAM_TOKEN = st.text_input("Masukkan Telegram Bot Token:", type="password")
     TELEGRAM_CHAT_ID = st.text_input("Masukkan Telegram Chat ID:")
     test_button = st.button("Tes Kirim Pesan Telegram")
 
-# ------------------- Input Interval dan Auto Refresh -------------------
+# ------------------- Interval & Auto Refresh -------------------
 col1, col2 = st.columns(2)
 with col1:
     interval = st.selectbox("Pilih Interval Data:", ["5m", "15m", "1h", "4h", "1d"], index=2)
 with col2:
     auto_refresh = st.toggle("🔁 Auto Refresh", value=True)
-refresh_interval = st.slider("Interval Refresh (detik):", 30, 600, 180)
+
+refresh_interval = st.slider("⏱ Interval Auto Refresh (detik):", 60, 600, 180)
 
 # ==========================================================
 # 🔗 KONEKSI API Hyperliquid
 # ==========================================================
 info = Info("https://api.hyperliquid.xyz")
 
-async def get_all_symbols():
+def get_all_symbols():
     meta = info.meta()
     return [x["name"] for x in meta["universe"]]
 
-async def get_ohlcv(symbol, interval="1h", limit=100):
+def get_ohlcv(symbol, interval="1h", limit=100):
     candles = info.candles(symbol, interval, limit)
     if not candles:
         return None
@@ -48,12 +48,11 @@ async def get_ohlcv(symbol, interval="1h", limit=100):
     return df
 
 # ==========================================================
-# 📊 PERHITUNGAN STOCHRSI
+# 📈 PERHITUNGAN STOCHRSI
 # ==========================================================
 def calc_stochrsi(df, period=14, smooth_k=3, smooth_d=3):
     if len(df) < period * 2:
         return None, None
-
     rsi = RSIIndicator(df["close"], window=period).rsi()
     stochrsi = (rsi - rsi.rolling(period).min()) / (rsi.rolling(period).max() - rsi.rolling(period).min()) * 100
     k = stochrsi.rolling(smooth_k).mean()
@@ -70,22 +69,20 @@ def send_telegram_message(token, chat_id, msg):
         st.error(f"Gagal kirim Telegram: {e}")
 
 # ==========================================================
-# 🧠 SCREENER
+# 🔍 FUNGSI SCREENER
 # ==========================================================
-async def run_screener():
+def run_screener():
     st.info("Mengambil data dari Hyperliquid API...")
-    symbols = await get_all_symbols()
+    symbols = get_all_symbols()
     results = []
 
     for sym in symbols:
-        df = await get_ohlcv(sym, interval=interval)
+        df = get_ohlcv(sym, interval=interval)
         if df is None:
             continue
-
         stoch_k, stoch_d = calc_stochrsi(df)
         if stoch_k is None:
             continue
-
         results.append({
             "Pair": sym,
             "StochRSI": round(stoch_k, 2),
@@ -114,15 +111,23 @@ if test_button:
 
 if st.button("🔎 Jalankan Screener Sekarang"):
     with st.spinner("Menganalisis semua pair..."):
-        df, oversold, overbought = asyncio.run(run_screener())
+        df, oversold, overbought = run_screener()
         st.success(f"✅ Data diperbarui: {datetime.datetime.now().strftime('%H:%M:%S')}")
-        st.dataframe(df.sort_values("StochRSI", ascending=True), use_container_width=True)
-        st.subheader("🟢 Oversold Pairs")
-        st.dataframe(oversold)
-        st.subheader("🔴 Overbought Pairs")
-        st.dataframe(overbought)
 
-# Auto refresh loop
+        st.subheader("📊 Semua Data StochRSI")
+        st.dataframe(df.sort_values("StochRSI"), use_container_width=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("🟢 Oversold Pairs")
+            st.dataframe(oversold)
+        with col2:
+            st.subheader("🔴 Overbought Pairs")
+            st.dataframe(overbought)
+
+# ==========================================================
+# ♻️ AUTO REFRESH
+# ==========================================================
 if auto_refresh:
     st.toast(f"⏳ Auto-refresh aktif setiap {refresh_interval} detik.")
     time.sleep(refresh_interval)
